@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Memory Challenge Task</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        :root {
+            --bg-dark: #0f172a;
+            --bg-card: #1e293b;
+            --text-main: #f1f5f9;
+            --text-muted: #94a3b8;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            user-select: none;
+            touch-action: manipulation;
+        }
+
+        .card {
+            background-color: var(--bg-card);
+            border: 1px solid #334155;
+        }
+
+        .modal-overlay {
+            background-color: rgba(0, 0, 0, 0.9);
+            backdrop-filter: blur(8px);
+        }
+
+        .word-btn {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .word-btn.selected {
+            background-color: var(--accent);
+            color: white;
+            border-color: #60a5fa;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+        }
+
+        input, select {
+            background-color: #0f172a !important;
+            border: 1px solid #475569 !important;
+            color: white !important;
+        }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: var(--accent) !important;
+            ring: 1px solid var(--accent);
+        }
+
+        .fixation-cross {
+            font-weight: 200;
+        }
+
+        /* Prevent button grey highlight on mobile */
+        button {
+            -webkit-tap-highlight-color: transparent;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <!-- Task Container -->
+    <div id="task-container" class="w-full max-w-2xl card rounded-3xl shadow-2xl p-6 md:p-10 min-h-[550px] flex flex-col justify-center relative overflow-hidden">
+        <div id="screen-content" class="w-full h-full flex flex-col items-center text-center">
+            <h1 class="text-3xl font-bold mb-4">Loading Task...</h1>
+        </div>
+    </div>
+
+    <!-- Aid Overlay -->
+    <div id="aid-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center modal-overlay p-4">
+        <div class="card p-8 rounded-3xl shadow-2xl max-w-sm w-full text-center">
+            <h2 class="text-xs font-bold mb-6 text-slate-500 uppercase tracking-widest">Saved Memory Aid</h2>
+            <div id="aid-content" class="grid grid-cols-2 gap-3 mb-8 text-xl font-medium">
+                <!-- Words injected here -->
+            </div>
+            <button id="close-aid-btn" class="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-4 rounded-2xl transition-all">
+                RETURN TO TASK
+            </button>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * MEMORY CHALLENGE TASK - Google Sheets Integrated
+         * 
+         * SETUP INSTRUCTIONS FOR GOOGLE SHEETS:
+         * 1. Create a Google Sheet.
+         * 2. Go to Extensions > Apps Script.
+         * 3. Paste the following script:
+         * 
+         * function doPost(e) {
+         *   var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+         *   var data = JSON.parse(e.postData.contents);
+         *   
+         *   // If sheet is empty, add headers
+         *   if (sheet.getLastRow() == 0) {
+         *     sheet.appendRow(Object.keys(data[0]));
+         *   }
+         *   
+         *   data.forEach(function(row) {
+         *     sheet.appendRow(Object.values(row));
+         *   });
+         *   
+         *   return ContentService.createTextOutput("Success").setMimeType(ContentService.MimeType.TEXT);
+         * }
+         * 
+         * 4. Click 'Deploy' > 'New Deployment' > 'Web App'.
+         * 5. Set 'Who has access' to 'Anyone'.
+         * 6. Copy the Web App URL and paste it into GOOGLE_SCRIPT_URL below.
+         */
+
+        const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbx6-7bRt_4_qH2CpZPE0EK-wxWbOJcOGfDOjNJn3-iUbuX7mXVNG-EneaFXIQ9aqS-UFA/exec';
+
+        // --- Standardized Concrete Noun Pool ---
+        // Sourced from common high-concreteness, high-frequency word lists for cognitive tasks
+        const WORD_POOL = [
+            "Apple", "Bird", "Book", "Boat", "Belt", "Cake", "Chair", "Cloud", "Coin", "Cup", 
+            "Desk", "Dog", "Door", "Drum", "Duck", "Egg", "Eye", "Fire", "Fish", "Flower", 
+            "Foot", "Fork", "Gate", "Gift", "Gold", "Hand", "Hat", "Heart", "Horn", "House", 
+            "Ice", "Iron", "Jar", "Jeep", "Juice", "Key", "King", "Lake", "Lamp", "Leaf", 
+            "Map", "Milk", "Moon", "Net", "Night", "Nose", "Oil", "Owl", "Park", "Pen", 
+            "Pipe", "Rain", "Ring", "River", "Road", "Ship", "Shoe", "Star", "Stone", "Sun", 
+            "Table", "Tea", "Tiger", "Toy", "Tree", "Unit", "Vase", "Voice", "Wall", "Wheel", 
+            "Wind", "Window", "Yard", "Zoo", "Bridge", "Castle", "Cheese", "Clock", "Flag", "Hammer"
+        ];
+
+        const CONFIG = {
+            fixationDuration: 1000,
+            encodingDuration: 5000,
+            practiceTrials: 2,
+            mainTrialsPerCondition: 5, // Total 10 main trials
+        };
+
+        let state = {
+            userInfo: {},
+            currentTrial: 0,
+            isPractice: true,
+            trials: [],
+            results: [],
+            wordPool: [...WORD_POOL],
+            
+            // Current Trial Logic
+            encodingWords: [],
+            distractorWords: [],
+            offloadDecision: null,
+            offloadDecisionRT: 0,
+            aidAccessCount: 0,
+            aidViewStartTime: 0,
+            aidViewDuration: 0,
+            recognitionStartTime: 0,
+            selectedWords: new Set(),
+        };
+
+        const screenContainer = document.getElementById('screen-content');
+        const aidModal = document.getElementById('aid-modal');
+        const aidContent = document.getElementById('aid-content');
+        const closeAidBtn = document.getElementById('close-aid-btn');
+
+        function shuffle(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+            return array;
+        }
+
+        function getWords(count) {
+            if (state.wordPool.length < count) state.wordPool = [...WORD_POOL];
+            shuffle(state.wordPool);
+            return state.wordPool.splice(0, count);
+        }
+
+        function initTask() {
+            let mainTrials = [];
+            for(let i=0; i<CONFIG.mainTrialsPerCondition; i++) {
+                mainTrials.push('low');
+                mainTrials.push('high');
+            }
+            shuffle(mainTrials);
+
+            state.trials = [
+                { type: 'practice', load: 'low' },
+                { type: 'practice', load: 'high' },
+                ...mainTrials.map(load => ({ type: 'main', load }))
+            ];
+
+            showDemographics();
+        }
+
+        function showDemographics() {
+            screenContainer.innerHTML = `
+                <h1 class="text-2xl font-bold mb-8 text-blue-400">Welcome to the Memory Challenge</h1>
+                <div class="w-full max-w-md space-y-5 text-left">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-400 mb-1">Full Name</label>
+                        <input type="text" id="name" class="w-full p-3 rounded-xl card focus:ring-2 focus:ring-blue-500 transition-all">
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-1">Age</label>
+                            <input type="number" id="age" class="w-full p-3 rounded-xl card">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-1">Gender</label>
+                            <select id="gender" class="w-full p-3 rounded-xl card">
+                                <option value="">Select...</option>
+                                <option value="male">Male</option>
+                                <option value="female">Female</option>
+                                <option value="other">Other</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-400 mb-1">Education Qualification</label>
+                        <input type="text" id="education" placeholder="e.g. Bachelor's Degree" class="w-full p-3 rounded-xl card">
+                    </div>
+                    <button id="submit-demo" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-2xl mt-4 shadow-lg transition-all active:scale-95">
+                        CONTINUE
+                    </button>
+                </div>
+            `;
+
+            document.getElementById('submit-demo').onclick = () => {
+                const name = document.getElementById('name').value;
+                const age = document.getElementById('age').value;
+                const gender = document.getElementById('gender').value;
+                const education = document.getElementById('education').value;
+
+                if (!name || !age || !gender || !education) {
+                    alert("Please fill in all fields.");
+                    return;
+                }
+
+                state.userInfo = { name, age, gender, education, subject_id: 'S_' + Date.now().toString().slice(-6) };
+                showInstructions();
+            };
+        }
+
+        function showInstructions() {
+            screenContainer.innerHTML = `
+                <h2 class="text-2xl font-bold mb-6">How to Play</h2>
+                <div class="text-left space-y-4 mb-8 text-slate-300">
+                    <p>1. A list of words will appear for 5 seconds. Try to remember them.</p>
+                    <p>2. You'll be asked if you want to keep the list for later reference.</p>
+                    <p>3. You will then be shown a grid of words and must select the ones you saw earlier.</p>
+                    <p>4. The game includes 2 practice rounds and 10 real rounds.</p>
+                </div>
+                <button id="start-practice" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-2xl shadow-lg transition-all active:scale-95">
+                    START PRACTICE ROUND
+                </button>
+            `;
+            document.getElementById('start-practice').onclick = nextTrial;
+        }
+
+        function nextTrial() {
+            if (state.currentTrial >= state.trials.length) {
+                showFinishing();
+                return;
+            }
+
+            const trialConfig = state.trials[state.currentTrial];
+            state.isPractice = trialConfig.type === 'practice';
+            const loadCount = trialConfig.load === 'low' ? 4 : 8;
+            
+            state.encodingWords = getWords(loadCount);
+            state.distractorWords = getWords(8);
+            state.offloadDecision = null;
+            state.aidAccessCount = 0;
+            state.aidViewDuration = 0;
+            state.selectedWords = new Set();
+
+            runFixation();
+        }
+
+        function runFixation() {
+            screenContainer.innerHTML = `<div class="fixation-cross text-slate-700 text-8xl">+</div>`;
+            setTimeout(runEncoding, CONFIG.fixationDuration);
+        }
+
+        function runEncoding() {
+            const isPractice = state.isPractice ? `<div class="mb-4 text-amber-500 font-bold uppercase tracking-tighter text-sm">Practice Round</div>` : "";
+            
+            screenContainer.innerHTML = `
+                ${isPractice}
+                <h3 class="text-slate-400 text-sm font-medium mb-8">MEMORIZE THESE WORDS</h3>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 w-full px-2">
+                    ${state.encodingWords.map(word => `
+                        <div class="card p-5 rounded-2xl text-xl font-semibold shadow-sm text-white">
+                            ${word}
+                        </div>
+                    `).join('')}
+                </div>
+                <div class="mt-12 w-full max-w-xs bg-slate-800 h-1.5 rounded-full overflow-hidden mx-auto">
+                    <div class="bg-blue-500 h-full animate-[progress_5s_linear_forwards]"></div>
+                </div>
+            `;
+
+            setTimeout(showDecision, CONFIG.encodingDuration);
+        }
+
+        function showDecision() {
+            const startTime = performance.now();
+            screenContainer.innerHTML = `
+                <h2 class="text-xl font-bold mb-10 text-slate-200 px-4">Would you like to keep this list available to view during the task?</h2>
+                <div class="flex flex-col md:flex-row gap-4 w-full max-w-md px-6">
+                    <button id="save-yes" class="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-300 font-bold py-6 px-4 rounded-2xl border border-slate-600 transition-all active:scale-95">
+                        YES, KEEP LIST
+                    </button>
+                    <button id="save-no" class="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-300 font-bold py-6 px-4 rounded-2xl border border-slate-600 transition-all active:scale-95">
+                        NO, DON'T KEEP
+                    </button>
+                </div>
+            `;
+
+            const handle = (d) => {
+                state.offloadDecisionRT = Math.round(performance.now() - startTime);
+                state.offloadDecision = d;
+                runRecognition();
+            };
+
+            document.getElementById('save-yes').onclick = () => handle('saved');
+            document.getElementById('save-no').onclick = () => handle('not_saved');
+        }
+
+        function runRecognition() {
+            state.recognitionStartTime = performance.now();
+            const allWords = shuffle([...state.encodingWords, ...state.distractorWords]);
+            
+            screenContainer.innerHTML = `
+                <div class="flex flex-col w-full h-full">
+                    <div class="flex justify-between items-start mb-6 gap-4">
+                        <div class="text-left">
+                            <h2 class="text-lg font-bold text-white">Selection Task</h2>
+                            <p class="text-xs text-slate-500">Select the words you saw in the list.</p>
+                        </div>
+                        <div id="aid-button-container"></div>
+                    </div>
+
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3 mb-8">
+                        ${allWords.map(word => `
+                            <button class="word-btn p-3 md:p-4 border border-slate-700 rounded-xl font-medium text-slate-300 hover:border-slate-500" data-word="${word}">
+                                ${word}
+                            </button>
+                        `).join('')}
+                    </div>
+
+                    <button id="submit-btn" disabled class="w-full bg-blue-600/50 text-white/50 cursor-not-allowed font-bold py-4 rounded-2xl transition-all text-lg mt-auto">
+                        SUBMIT (Select at least 1)
+                    </button>
+                </div>
+            `;
+
+            const aidBtnContainer = document.getElementById('aid-button-container');
+            if (state.offloadDecision === 'saved') {
+                aidBtnContainer.innerHTML = `
+                    <button id="open-aid-btn" class="bg-amber-900/30 hover:bg-amber-900/50 text-amber-500 font-bold py-2 px-3 rounded-xl border border-amber-900/50 flex items-center gap-2 text-sm transition-all">
+                        <span>👁️</span> VIEW LIST
+                    </button>
+                `;
+                document.getElementById('open-aid-btn').onclick = openAid;
+            }
+
+            const wordButtons = document.querySelectorAll('.word-btn');
+            const submitBtn = document.getElementById('submit-btn');
+
+            wordButtons.forEach(btn => {
+                btn.onclick = () => {
+                    const word = btn.getAttribute('data-word');
+                    if (state.selectedWords.has(word)) {
+                        state.selectedWords.delete(word);
+                        btn.classList.remove('selected');
+                    } else {
+                        state.selectedWords.add(word);
+                        btn.classList.add('selected');
+                    }
+                    
+                    // Validation
+                    if (state.selectedWords.size > 0) {
+                        submitBtn.disabled = false;
+                        submitBtn.classList.remove('bg-blue-600/50', 'text-white/50', 'cursor-not-allowed');
+                        submitBtn.classList.add('bg-blue-600', 'text-white', 'hover:bg-blue-700', 'active:scale-95');
+                        submitBtn.textContent = 'SUBMIT ANSWERS';
+                    } else {
+                        submitBtn.disabled = true;
+                        submitBtn.classList.add('bg-blue-600/50', 'text-white/50', 'cursor-not-allowed');
+                        submitBtn.classList.remove('bg-blue-600', 'text-white', 'hover:bg-blue-700', 'active:scale-95');
+                        submitBtn.textContent = 'SUBMIT (Select at least 1)';
+                    }
+                };
+            });
+
+            submitBtn.onclick = logResult;
+        }
+
+        function openAid() {
+            state.aidAccessCount++;
+            state.aidViewStartTime = performance.now();
+            aidContent.innerHTML = state.encodingWords.map(word => `<div class="p-3 card rounded-xl text-blue-300 border-blue-900/30">${word}</div>`).join('');
+            aidModal.classList.remove('hidden');
+        }
+
+        closeAidBtn.onclick = () => {
+            state.aidViewDuration += (performance.now() - state.aidViewStartTime);
+            aidModal.classList.add('hidden');
+        };
+
+        function logResult() {
+            const duration = performance.now() - state.recognitionStartTime;
+            const pureRT = Math.max(0, duration - state.aidViewDuration);
+            const hits = state.encodingWords.filter(w => state.selectedWords.has(w)).length;
+            const fa = [...state.selectedWords].filter(w => !state.encodingWords.includes(w)).length;
+
+            state.results.push({
+                ...state.userInfo,
+                trial: state.currentTrial + 1,
+                phase: state.isPractice ? 'practice' : 'main',
+                load: state.trials[state.currentTrial].load,
+                targets: state.encodingWords.join(';'),
+                offload_choice: state.offloadDecision,
+                decision_rt: state.offloadDecisionRT,
+                aid_used: state.aidAccessCount > 0 ? "Yes" : "No",
+                aid_views: state.aidAccessCount,
+                aid_duration: Math.round(state.aidViewDuration),
+                hits: hits,
+                false_alarms: fa,
+                accuracy: ((hits / state.encodingWords.length) * 100).toFixed(1),
+                task_rt: Math.round(pureRT),
+                timestamp: new Date().toISOString()
+            });
+
+            state.currentTrial++;
+            if (state.isPractice && state.currentTrial === CONFIG.practiceTrials) {
+                showPracticeEnd();
+            } else {
+                nextTrial();
+            }
+        }
+
+        function showPracticeEnd() {
+            screenContainer.innerHTML = `
+                <h2 class="text-3xl font-bold mb-6">Great job!</h2>
+                <p class="text-lg text-slate-400 mb-10 max-w-xs mx-auto">
+                    You've finished the practice rounds. Now let's start the main memory game.
+                </p>
+                <button id="start-main" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-5 rounded-2xl text-xl shadow-lg transition-all active:scale-95">
+                    BEGIN MAIN GAME
+                </button>
+            `;
+            document.getElementById('start-main').onclick = nextTrial;
+        }
+
+        function showFinishing() {
+            screenContainer.innerHTML = `
+                <h2 class="text-3xl font-bold mb-4">Task Complete!</h2>
+                <p class="text-slate-400 mb-10">We are saving your progress. Please do not close the window...</p>
+                <div class="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+            `;
+            
+            sendDataToGoogle();
+        }
+
+        async function sendDataToGoogle() {
+            const mainResults = state.results.filter(r => r.phase === 'main');
+            
+            if (GOOGLE_SCRIPT_URL) {
+                // We use a timeout to ensure the participant isn't stuck if the script is slow
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+                try {
+                    await fetch(GOOGLE_SCRIPT_URL, {
+                        method: 'POST',
+                        mode: 'no-cors', // Essential for Google Apps Script
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(mainResults),
+                        signal: controller.signal
+                    });
+                    clearTimeout(timeoutId);
+                    showFinalScreen(true);
+                } catch (e) {
+                    clearTimeout(timeoutId);
+                    console.error("Upload status unknown", e);
+                    // Because of 'no-cors', fetch often throws an error even when successful.
+                    // We show the final screen regardless so the participant can finish.
+                    showFinalScreen(true); 
+                }
+            } else {
+                showFinalScreen(false, "Note: Google Sheets URL not configured.");
+            }
+        }
+
+        function showFinalScreen(success, note = "") {
+            screenContainer.innerHTML = `
+                <div class="text-green-500 text-6xl mb-6">✓</div>
+                <h2 class="text-2xl font-bold mb-4">All Finished!</h2>
+                <p class="text-slate-400 mb-8">Thank you for participating in this memory challenge. Your responses have been recorded.</p>
+                ${note ? `<p class="text-amber-500 text-sm mb-4">${note}</p>` : ''}
+                <button id="dl-btn" class="text-slate-500 hover:text-white underline text-sm">
+                    Download Local CSV Backup
+                </button>
+            `;
+            document.getElementById('dl-btn').onclick = downloadCSV;
+        }
+
+        function downloadCSV() {
+            const headers = Object.keys(state.results[0]);
+            const rows = state.results.map(res => headers.map(h => `"${res[h]}"`).join(','));
+            const blob = new Blob([[headers.join(','), ...rows].join('\n')], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `memory_task_${state.userInfo.subject_id}.csv`;
+            a.click();
+        }
+
+        window.onload = initTask;
+    </script>
+</body>
+</html>
