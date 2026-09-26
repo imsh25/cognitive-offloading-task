@@ -357,7 +357,7 @@
                     </div>
 
                     <button id="submit-btn" disabled class="w-full bg-blue-600/50 text-white/50 cursor-not-allowed font-bold py-4 rounded-2xl transition-all text-lg mt-auto">
-                        SUBMIT (Select at least 1)
+                        SUBMIT (Select ${state.encodingWords.length} words)
                     </button>
                 </div>
             `;
@@ -378,16 +378,21 @@
             wordButtons.forEach(btn => {
                 btn.onclick = () => {
                     const word = btn.getAttribute('data-word');
+                    const required = state.encodingWords.length;
+
                     if (state.selectedWords.has(word)) {
                         state.selectedWords.delete(word);
                         btn.classList.remove('selected');
                     } else {
-                        state.selectedWords.add(word);
-                        btn.classList.add('selected');
+                        // Optional: Prevent selecting more than required
+                        if (state.selectedWords.size < required) {
+                            state.selectedWords.add(word);
+                            btn.classList.add('selected');
+                        }
                     }
                     
-                    // Validation
-                    if (state.selectedWords.size > 0) {
+                    // Validation: Must match the exact load count (4 or 8)
+                    if (state.selectedWords.size === required) {
                         submitBtn.disabled = false;
                         submitBtn.classList.remove('bg-blue-600/50', 'text-white/50', 'cursor-not-allowed');
                         submitBtn.classList.add('bg-blue-600', 'text-white', 'hover:bg-blue-700', 'active:scale-95');
@@ -396,7 +401,7 @@
                         submitBtn.disabled = true;
                         submitBtn.classList.add('bg-blue-600/50', 'text-white/50', 'cursor-not-allowed');
                         submitBtn.classList.remove('bg-blue-600', 'text-white', 'hover:bg-blue-700', 'active:scale-95');
-                        submitBtn.textContent = 'SUBMIT (Select at least 1)';
+                        submitBtn.textContent = `SUBMIT (Select ${required} words)`;
                     }
                 };
             });
